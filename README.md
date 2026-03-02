@@ -79,7 +79,8 @@ This is the most original part of this playbook — a framework for using multip
 7. [Maintenance & Updates](#7-maintenance--updates)
 8. [Pre-Launch Checklist](#8-pre-launch-checklist)
 9. [Multi-Model QA Pipeline](#9-multi-model-qa-pipeline)
-10. [Recommended AI Coding Tool Plugin Stack](#10-recommended-ai-coding-tool-plugin-stack)
+10. [MCP / AI Agent Security](#10-mcp--ai-agent-security)
+11. [Recommended AI Coding Tool Plugin Stack](#11-recommended-ai-coding-tool-plugin-stack)
 - [Appendix: Common Attack Scenarios](#appendix-common-attack-scenarios)
 
 ---
@@ -1023,15 +1024,141 @@ When setting up automated QA (e.g., GitHub Actions):
 
 ---
 
-## 10. Recommended AI Coding Tool Plugin Stack
+## 10. MCP / AI Agent Security
 
-### 10.1 Why Plugins Matter
+**Why this section exists**: In early 2026, a company using Claude Code with a third-party MCP plugin (Antigravity) had their Google Ads MCC account hijacked — resulting in eight-figure (in JPY) damages. AI agents operate with your legitimate credentials, making their actions indistinguishable from your own. If an attacker can manipulate what the agent does, they effectively have your access.
+
+This section covers attack vectors specific to AI coding agents and MCP (Model Context Protocol) integrations, along with practical defenses.
+
+### 10.1 🔴 Attack Vectors
+
+AI agents introduce a new class of security risks beyond traditional web application attacks. The key insight: **agents act with your permissions**, so tricking an agent is equivalent to tricking you.
+
+| # | Attack Pattern | How it works | Risk Level |
+|---|---------------|--------------|------------|
+| 1 | **Prompt Injection via Web Content** | Malicious instructions hidden in web pages using CSS tricks (`font-size:0`, `color:transparent`, `display:none`). When your AI agent reads the page, it may execute these hidden instructions | 🔴 Critical |
+| 2 | **Shared Prompt Poisoning** | "Helpful prompt templates" distributed online contain embedded MCP tool operation instructions. When pasted into your AI agent session, the hidden instructions execute | 🔴 Critical |
+| 3 | **MCP Permission Escalation** | Wildcard-permitted tools (e.g., `Bash(npm install:*)`) are exploited via prompt injection to run legitimate-looking but malicious operations | 🔴 Critical |
+| 4 | **Token / Secret Leakage** | AI agent outputs API keys or tokens in logs, template expansions, or session history. If session history syncs to cloud or is screenshotted, secrets are exposed | 🟡 Important |
+| 5 | **Cookie / Session Hijack** | AI agent's browser automation sessions expose authentication cookies, potentially bypassing 2FA on dashboards (cloud providers, payment processors, GitHub) | 🟡 Important |
+
+### 10.2 🔴 Agent Permission Management
+
+**The problem**: AI coding tools like Claude Code use a permission file (e.g., `.claude/settings.local.json`) that accumulates allowed commands over time. Wildcard permissions like `Bash(npm install:*)` mean "any npm package can be installed" — including malicious ones triggered by prompt injection.
+
+**Wildcard permissions that carry inherent risk** (often necessary for development):
+
+```
+- Bash(npm install:*)   → Can install any package (supply chain attack vector)
+- Bash(curl:*)          → Can make HTTP requests to any URL
+- Bash(python3:*)       → Can execute any Python script
+- Bash(env:*)           → Can display environment variables (secret exposure)
+- Bash(source:*)        → Can execute any shell script
+- File system MCPs      → Can read/write anywhere in allowed directories
+```
+
+**Defenses**:
+
+```
+1. Regularly audit your permission file — remove one-time commands after use
+2. Before running npm install, verify the package name on the official registry
+   (watch for typosquatting: "anthrpic-sdk" vs "anthropic-sdk")
+3. Run npm audit after every install
+4. Keep your permission file in .gitignore (don't commit it to your repo)
+5. Apply the principle of least privilege — avoid granting wildcard permissions
+   for tools you rarely use
+```
+
+**Checklist**:
+- [ ] Permission file is regularly cleaned of stale one-time entries
+- [ ] Permission file is in `.gitignore` (not committed to the repository)
+- [ ] `npm install` is always preceded by package name verification on the official registry
+- [ ] `npm audit` runs after every dependency change
+
+### 10.3 🟡 Token & Secret Leakage Prevention
+
+**The problem**: If an AI agent runs `env`, `cat .env`, or `echo $API_KEY`, your secrets appear in the session history. Session history may persist in cloud backups, terminal scrollback, or screenshots.
+
+**Never let your AI agent run**:
+
+```
+- cat .env / cat .dev.vars       → Exposes file contents to session history
+- echo $API_KEY                  → Exposes variable value to session history
+- env | grep KEY                 → Secret values appear in filtered output
+- printenv                       → Dumps all environment variables
+```
+
+**Safe alternatives**:
+
+```
+- wrangler secret list           → Shows secret names only (not values) ✅
+- Check config files             → Verify secrets aren't in committed files ✅
+- Use .env.example               → Document required variables without values ✅
+```
+
+**Checklist**:
+- [ ] AI agent session history contains no API key substrings
+- [ ] Configuration files (e.g., `wrangler.toml`) contain no secret values
+- [ ] Local secret files (`.env`, `.dev.vars`) are never displayed by the agent
+
+### 10.4 🟡 External MCP Plugin Risk Assessment
+
+**The problem**: MCP plugins give your AI agent access to external services. A prompt injection attack could instruct the agent to "forward all emails" or "delete production data" through these legitimately connected plugins.
+
+**Evaluate every connected MCP plugin**:
+
+| Permission Scope | Risk Level | Examples |
+|-----------------|------------|----------|
+| Full file system + process execution | 🔴 Critical | Desktop Commander, shell access tools |
+| Production data modification | 🔴 Critical | Cloud provider MCPs (Cloudflare, AWS, etc.) |
+| Send messages / emails | 🟡 Important | Gmail, Slack, messaging MCPs |
+| Browser automation | 🟡 Important | Playwright, Puppeteer MCPs |
+| Read-only access | 🟢 Low | Documentation fetchers, Context7 |
+
+**Defenses**:
+
+```
+1. Disable MCP plugins you don't need for the current session
+2. Never follow "instructions" found inside web page content
+3. Verify shared prompts for hidden MCP operation commands before use
+4. Report any unexpected behavior immediately (unintended file changes,
+   unexpected network requests, unauthorized tool calls)
+5. Keep development sessions and MCP configuration changes in separate
+   chat sessions (recommended by Desktop Commander documentation)
+```
+
+### 10.5 🟢 Session Hygiene
+
+**Best practices for AI agent sessions**:
+
+```
+1. After long AI agent sessions, have a human verify before critical
+   operations (deploys, payment config changes, infrastructure modifications)
+2. Don't leave authenticated dashboard tabs (cloud provider, payment processor,
+   GitHub) open while an AI agent has browser automation access
+3. Terminate the session immediately if you observe suspicious behavior
+4. Keep MCP configuration changes in a dedicated session — don't mix them
+   with development work
+5. Periodically clear session context to prevent context poisoning from
+   accumulating over long conversations
+```
+
+**Checklist**:
+- [ ] MCP configuration changes happen in separate sessions from development work
+- [ ] No web page "instructions" have been followed to execute MCP tool operations
+- [ ] Critical operations after long sessions are verified by a human before execution
+
+---
+
+## 11. Recommended AI Coding Tool Plugin Stack
+
+### 11.1 Why Plugins Matter
 
 AI coding tools (Claude Code, Cursor, GitHub Copilot, Windsurf, etc.) support plugins and extensions that can catch security and quality issues **in real time** — before code is even committed. This is Layer 0 and Layer 1 of the QA pipeline from Section 9.
 
 **Key principle**: If both a plugin and an MCP server offer the same capability, **prefer the plugin** — it runs locally, has lower latency, and doesn't require network calls.
 
-### 10.2 Security & QA Plugins
+### 11.2 Security & QA Plugins
 
 | Plugin | What it does | When it runs |
 |--------|-------------|-------------|
@@ -1042,7 +1169,7 @@ AI coding tools (Claude Code, Cursor, GitHub Copilot, Windsurf, etc.) support pl
 
 **Start here**: Install Semgrep first. It catches the most critical issues with zero configuration.
 
-### 10.3 Code Quality Plugins
+### 11.3 Code Quality Plugins
 
 | Plugin | What it does | When it runs |
 |--------|-------------|-------------|
@@ -1051,7 +1178,7 @@ AI coding tools (Claude Code, Cursor, GitHub Copilot, Windsurf, etc.) support pl
 | **Test analyzer** | Reviews test coverage quality and identifies gaps | PR creation (Layer 1) |
 | **Comment analyzer** | Checks documentation accuracy against actual code | On request |
 
-### 10.4 Infrastructure & Documentation Plugins
+### 11.4 Infrastructure & Documentation Plugins
 
 | Plugin | What it does | When it runs |
 |--------|-------------|-------------|
@@ -1059,7 +1186,7 @@ AI coding tools (Claude Code, Cursor, GitHub Copilot, Windsurf, etc.) support pl
 | **Provider tools** | Cloudflare, Vercel, AWS — manage resources from your IDE | On demand |
 | **Package health checker** | Checks dependency quality, security, and license status | On install |
 
-### 10.5 Recommended Stack by Project Type
+### 11.5 Recommended Stack by Project Type
 
 | Project Type | Must-Have Plugins | Nice-to-Have |
 |-------------|------------------|-------------|
@@ -1086,6 +1213,9 @@ AI coding tools (Claude Code, Cursor, GitHub Copilot, Windsurf, etc.) support pl
 | Image upload exploit | Execute code via disguised files | Magic byte validation + SVG rejection (§3.4) |
 | SSRF via user/AI URLs | Access internal services or cloud metadata | URL validation + IP blocklist (§3.5) |
 | AI data exfiltration | Extract user PII from AI API logs | PII stripping + provider policy review (§2.6) |
+| Prompt injection via web content | Hijack AI agent to execute attacker's commands | Never follow embedded page instructions (§10.1) |
+| MCP permission escalation | Install malicious packages via wildcard permissions | Audit permission file + verify packages (§10.2) |
+| AI session secret leakage | Harvest API keys from agent session history | Never display env variables in agent sessions (§10.3) |
 
 ---
 
