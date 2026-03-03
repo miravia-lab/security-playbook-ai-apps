@@ -74,7 +74,7 @@ This is the most original part of this playbook — a framework for using multip
 2. [API & Data Leakage](#2-api--data-leakage) _(includes 2.6 Data Privacy & AI API Usage)_
 3. [Attack Resistance](#3-attack-resistance) _(includes 3.5 SSRF)_
 4. [Frontend Security](#4-frontend-security)
-5. [Infrastructure & Configuration](#5-infrastructure--configuration)
+5. [Infrastructure & Configuration](#5-infrastructure--configuration) _(includes 5.4 GitHub Branch Protection)_
 6. [Incident Response](#6-incident-response)
 7. [Maintenance & Updates](#7-maintenance--updates)
 8. [Pre-Launch Checklist](#8-pre-launch-checklist)
@@ -740,6 +740,50 @@ Map all your secrets and understand the blast radius of each:
 - [ ] You know how to upgrade to a paid plan if needed
 - [ ] You monitor resource usage (CPU, bandwidth, request count)
 
+### 5.4 🔴 GitHub Branch Protection (Protecting `main`)
+
+**Why it's dangerous**: Without branch protection, anyone with write access — including AI coding tools running automated commits — can push directly to `main`. This means code reaches production without code review, without CI passing, and without any human verification. A single bad commit can take down your app, leak secrets, or introduce vulnerabilities.
+
+**⚠️ GitHub Free Plan Gotcha**:
+
+> **Rulesets (the newer GitHub feature) do NOT work on private repositories under the Free plan.** They require the Team plan or higher. If you set up a Ruleset on a Free-plan private repo, it will appear to save but **will not actually enforce anything**. This is a silent failure that gives you a false sense of security.
+>
+> **Use the legacy Branch Protection Rules instead** — these work on Free-plan private repos.
+
+**What to do**:
+
+1. Go to your repo → **Settings** → **Branches**
+2. Click **Add branch protection rule** (NOT "Add ruleset")
+3. Configure these settings:
+
+| Setting | Value | Why |
+|---------|-------|-----|
+| **Branch name pattern** | `main` | Protects your production branch |
+| **Require a pull request before merging** | ✅ ON | Forces code review via PR |
+| **Require status checks to pass before merging** | ✅ ON | Blocks merge if CI fails |
+| **Status checks that are required** | Add your CI workflow checks (e.g., test suite, build, lint) | Ensures specific checks must pass |
+| **Do not allow force pushes** | ✅ ON | Prevents history rewriting |
+| **Do not allow deletions** | ✅ ON | Prevents accidental branch deletion |
+
+4. Click **Create** to save the rule
+
+**How to verify it works**:
+
+```bash
+# Try pushing directly to main — this should be REJECTED
+git checkout main
+git commit --allow-empty -m "test direct push"
+git push origin main
+# Expected: remote: error: GH006: Protected branch update failed
+```
+
+**✅ Checklist**:
+- [ ] A branch protection rule for `main` is visible under Settings → Branches
+- [ ] You are using **Branch Protection Rules** (not Rulesets) if on the GitHub Free plan with a private repo
+- [ ] Direct push to `main` is rejected (tested manually)
+- [ ] PRs with failing CI status checks cannot be merged
+- [ ] Force pushes to `main` are blocked
+
 ---
 
 ## 6. Incident Response
@@ -859,6 +903,7 @@ AI providers update their SDKs and models frequently. Model deprecation timeline
 □ Rate limiting works on AI endpoints
 □ AI provider has monthly spending limits configured
 □ Payment provider test mode → live mode switch is complete (all keys replaced)
+□ GitHub branch protection rule is active on main (direct push rejected)
 □ ___________________________ (add your project-specific items)
 □ ___________________________ (add your project-specific items)
 ```
