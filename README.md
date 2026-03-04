@@ -620,10 +620,26 @@ Ongoing (monthly):
 - Update cautiously: read changelogs for major version bumps
 ```
 
+**Supply chain attack prevention** (`preinstall` script attacks):
+
+Malware such as the Shai-Hulud worm (2025) exploits npm's `preinstall` scripts — malicious code runs **before** the package finishes installing. By the time you notice, secrets may already be exfiltrated. To block this attack vector:
+
+```bash
+# Disable all install scripts globally (blocks ~99% of preinstall-based attacks)
+npm config set ignore-scripts true
+
+# When a legitimate package needs install scripts (e.g., sharp, bcrypt):
+# Run scripts explicitly for that package only
+npm rebuild <package-name>
+```
+
+> **Note**: Some packages (native bindings, tools like `sharp` or `bcrypt`) require install scripts to function. After enabling `ignore-scripts`, you may need to run `npm rebuild <package-name>` for those specific packages. This is a minor inconvenience compared to the protection it provides.
+
 **✅ Checklist**:
 - [ ] `npm audit` shows 0 critical and 0 high vulnerabilities
 - [ ] `package-lock.json` (or equivalent) is committed to git
 - [ ] If you have a separate backend package.json, audit that too
+- [ ] `npm config get ignore-scripts` returns `true`
 
 ### 4.3 🟡 SPA State & Browser History
 
@@ -848,6 +864,19 @@ git push origin main
 □ Check data store usage (approaching limits?)
 □ Verify data backups are running (if applicable — database snapshots, KV exports)
 □ Test a backup restore on a non-production environment (at least once)
+```
+
+**Quarterly (every 3 months) — Token & Key Rotation**:
+
+Even if you haven't detected a compromise, regular rotation limits the blast radius of any undetected leak. Mark your calendar for this quarterly cycle:
+
+```
+□ Regenerate npm access tokens (npmjs.com → Access Tokens)
+□ Regenerate GitHub Personal Access Tokens
+□ Regenerate SSH keys (and update authorized_keys on servers)
+□ Rotate API keys for AI providers (Anthropic, OpenAI, etc.)
+□ Rotate payment provider API keys (Stripe, etc.) — update in production .env
+□ Verify old tokens are revoked (not just unused — actually deleted)
 ```
 
 ### 7.2 Dependency Update Policy
@@ -1114,11 +1143,30 @@ AI agents introduce a new class of security risks beyond traditional web applica
    for tools you rarely use
 ```
 
+**Hallucination squatting** — a growing supply chain threat:
+
+AI coding tools sometimes suggest package names that don't actually exist (hallucinations). Attackers exploit this by **pre-registering those fake names on npm with malicious code**, then waiting for AI tools to recommend them. This is called "hallucination squatting."
+
+```
+When your AI tool suggests a package you don't recognize:
+
+1. Search the package name on Google / npmjs.com BEFORE pressing Y
+2. Verify: Does it have a real GitHub repo? Stars > 1,000? Updated within 3 months?
+3. If you can't find it — it's likely a hallucination or a trap. Say NO.
+
+Red flags:
+- Package name looks plausible but has no search results
+- Very low download count or no GitHub repository linked
+- Published very recently with no community adoption
+- Name closely resembles a popular package (e.g., "react-scroll-smoothly-v2")
+```
+
 **Checklist**:
 - [ ] Permission file is regularly cleaned of stale one-time entries
 - [ ] Permission file is in `.gitignore` (not committed to the repository)
 - [ ] `npm install` is always preceded by package name verification on the official registry
 - [ ] `npm audit` runs after every dependency change
+- [ ] AI-suggested package names are verified on npmjs.com/GitHub before installation
 
 ### 10.3 🟡 Token & Secret Leakage Prevention
 
